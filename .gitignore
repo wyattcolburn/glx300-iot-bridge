@@ -1,0 +1,13 @@
+# Generated configs with embedded secrets
+mosquitto-bridge.conf
+curl_cmd.txt
+
+# Build artifacts
+build-mips/
+*.o
+
+# Compiled binaries
+glx300_telemetry
+
+# Local tooling
+.claude/

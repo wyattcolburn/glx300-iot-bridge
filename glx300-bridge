@@ -1,0 +1,28 @@
+#!/bin/sh /etc/rc.common
+
+START=95
+STOP=10
+
+PIDFILE_FWD=/var/run/rs485_forward.pid
+PIDFILE_CMD=/var/run/rs485_cmd.pid
+
+start() {
+    echo "Starting GLX300 bridge..."
+    mosquitto -c /etc/mosquitto/mosquitto.conf -d
+    sleep 2
+    start-stop-daemon -S -b -m -p "$PIDFILE_FWD" -x /bin/sh -- /etc/rs485_forward.sh
+    start-stop-daemon -S -b -m -p "$PIDFILE_CMD" -x /bin/sh -- /etc/rs485_cmd.sh
+    echo "GLX300 bridge started."
+}
+
+stop() {
+    echo "Stopping GLX300 bridge..."
+    for PIDFILE in "$PIDFILE_FWD" "$PIDFILE_CMD"; do
+        if [ -f "$PIDFILE" ]; then
+            kill "$(cat $PIDFILE)" 2>/dev/null
+            rm -f "$PIDFILE"
+        fi
+    done
+    killall mosquitto 2>/dev/null
+    echo "GLX300 bridge stopped."
+}
