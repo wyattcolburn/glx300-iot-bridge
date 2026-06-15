@@ -9,6 +9,12 @@ TOPIC="glx300/cmd/#"
 
 echo "C2D->RS485 listener started: $TOPIC -> $PORT_RS485"
 
+# Wait for broker to be ready
+until mosquitto_pub -h "$BROKER" -p 1883 -t "glx300/status" -m "rs485_cmd ready" 2>/dev/null; do
+    echo "Waiting for mosquitto..."
+    sleep 2
+done
+
 mosquitto_sub -h "$BROKER" -p 1883 -t "$TOPIC" | while read -r PAYLOAD; do
     [ -z "$PAYLOAD" ] && continue
 
