@@ -1,21 +1,22 @@
 #!/bin/sh
-# Deploy mosquitto bridge config to GLX300
+# Deploy mosquitto bridge config + X.509 certs to GLX300
 # Run from your laptop: bash deploy_bridge.sh
 
 set -e
 DEVICE=root@192.168.8.1
 
-scp mosquitto-bridge.conf "$DEVICE":/tmp/
+echo "Copying config and certs..."
+scp mosquitto-bridge.conf "$DEVICE":/tmp/mosquitto-bridge.conf
+scp device.crt device.key "$DEVICE":/tmp/
+
 ssh "$DEVICE" '
-  # Install mosquitto broker with SSL if not present
   opkg list-installed | grep -q "^mosquitto-ssl" || opkg install mosquitto-ssl
 
-  # Install config
   cp /tmp/mosquitto-bridge.conf /etc/mosquitto/mosquitto.conf
+  cp /tmp/device.crt /tmp/device.key /etc/mosquitto/
+  chmod 600 /etc/mosquitto/device.key
 
-  # Restart mosquitto
-  /etc/init.d/mosquitto restart 2>/dev/null || mosquitto -c /etc/mosquitto/mosquitto.conf -d
+  /etc/init.d/glx300-bridge restart 2>/dev/null || mosquitto -c /etc/mosquitto/mosquitto.conf -d
 
-  echo "Bridge started."
-  echo "Test with: mosquitto_pub -h 127.0.0.1 -p 1883 -t glx300/data -m \x27{"src":"glx300","msg":"hello"}\x27"
+  echo "Bridge started with X.509 auth."
 '

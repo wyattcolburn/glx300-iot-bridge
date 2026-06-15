@@ -7,6 +7,11 @@ PIDFILE_FWD=/var/run/rs485_forward.pid
 PIDFILE_CMD=/var/run/rs485_cmd.pid
 
 start() {
+    # Kill any stale instances and remove pidfiles before starting fresh
+    ps | grep '/etc/rs485' | grep -v grep | awk '{print $1}' | xargs kill 2>/dev/null
+    killall mosquitto 2>/dev/null
+    rm -f "$PIDFILE_FWD" "$PIDFILE_CMD"
+    sleep 1
     echo "Starting GLX300 bridge..."
     mosquitto -c /etc/mosquitto/mosquitto.conf -d
     sleep 2

@@ -2,6 +2,10 @@
 mosquitto-bridge.conf
 curl_cmd.txt
 
+# X.509 device credentials
+device.key
+device.crt
+
 # Build artifacts
 build-mips/
 *.o

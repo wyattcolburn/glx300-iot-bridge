@@ -1,34 +1,25 @@
 #!/usr/bin/env python3
 """
-Generate a mosquitto bridge config for Azure IoT Hub.
-Writes mosquitto-bridge.conf and a deploy script.
+Generate a mosquitto bridge config for Azure IoT Hub using X.509 cert auth.
+Writes mosquitto-bridge.conf and deploy_bridge.sh.
+Requires device.crt and device.key to exist in the same directory.
 """
-import base64, hmac, hashlib, time, urllib.parse, os
+import os, time
 
 HUB       = "GLX300.azure-devices.net"
 DEVICE_ID = "py-poc-01"
-KEY_B64   = os.environ.get("IOT_HUB_KEY", "")  # export IOT_HUB_KEY=<base64 SharedAccessKey>
-DURATION  = 365 * 24 * 3600  # 1 year SAS token for the bridge
 
-def make_sas(duration_secs):
-    expiry = int(time.time()) + duration_secs
-    resource = f"{HUB}/devices/{DEVICE_ID}"
-    resource_enc = urllib.parse.quote(resource, safe="")
-    string_to_sign = f"{resource_enc}\n{expiry}"
-    key_bytes = base64.b64decode(KEY_B64)
-    sig = base64.b64encode(
-        hmac.new(key_bytes, string_to_sign.encode(), hashlib.sha256).digest()
-    ).decode()
-    return (f"SharedAccessSignature sr={resource_enc}"
-            f"&sig={urllib.parse.quote(sig, safe='')}"
-            f"&se={expiry}")
+out_dir    = os.path.dirname(os.path.abspath(__file__))
+conf_path  = os.path.join(out_dir, "mosquitto-bridge.conf")
+deploy_path = os.path.join(out_dir, "deploy_bridge.sh")
 
-sas = make_sas(DURATION)
+for f in ["device.crt", "device.key"]:
+    if not os.path.exists(os.path.join(out_dir, f)):
+        raise FileNotFoundError(f"{f} not found — run: openssl genrsa -out device.key 2048 && openssl req -new -x509 -key device.key -out device.crt -days 3650 -subj '/CN={DEVICE_ID}'")
 
 conf = f"""\
-# mosquitto bridge → Azure IoT Hub
+# mosquitto bridge → Azure IoT Hub (X.509 cert auth)
 # Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}
-# SAS token valid for 1 year — regenerate with gen_bridge_config.py before expiry
 
 # Local broker: listen only on loopback
 listener 1883 127.0.0.1
@@ -39,10 +30,11 @@ connection azure-iothub
 address {HUB}:8883
 clientid {DEVICE_ID}
 username {HUB}/{DEVICE_ID}/?api-version=2021-04-12
-password {sas}
 
 bridge_protocol_version mqttv311
 bridge_cafile /etc/ssl/certs/ca-certificates.crt
+bridge_certfile /etc/mosquitto/device.crt
+bridge_keyfile /etc/mosquitto/device.key
 bridge_tls_version tlsv1.2
 try_private false
 cleansession true
@@ -60,31 +52,28 @@ topic # in 0 glx300/cmd/ devices/{DEVICE_ID}/messages/devicebound/
 
 deploy = f"""\
 #!/bin/sh
-# Deploy mosquitto bridge config to GLX300
+# Deploy mosquitto bridge config + X.509 certs to GLX300
 # Run from your laptop: bash deploy_bridge.sh
 
 set -e
 DEVICE=root@192.168.8.1
 
-scp mosquitto-bridge.conf "$DEVICE":/tmp/
+echo "Copying config and certs..."
+scp mosquitto-bridge.conf "$DEVICE":/tmp/mosquitto-bridge.conf
+scp device.crt device.key "$DEVICE":/tmp/
+
 ssh "$DEVICE" '
-  # Install mosquitto broker with SSL if not present
   opkg list-installed | grep -q "^mosquitto-ssl" || opkg install mosquitto-ssl
 
-  # Install config
   cp /tmp/mosquitto-bridge.conf /etc/mosquitto/mosquitto.conf
+  cp /tmp/device.crt /tmp/device.key /etc/mosquitto/
+  chmod 600 /etc/mosquitto/device.key
 
-  # Restart mosquitto
-  /etc/init.d/mosquitto restart 2>/dev/null || mosquitto -c /etc/mosquitto/mosquitto.conf -d
+  /etc/init.d/glx300-bridge restart 2>/dev/null || mosquitto -c /etc/mosquitto/mosquitto.conf -d
 
-  echo "Bridge started."
-  echo "Test with: mosquitto_pub -h 127.0.0.1 -p 1883 -t glx300/data -m \\x27{{\"src\":\"glx300\",\"msg\":\"hello\"}}\\x27"
+  echo "Bridge started with X.509 auth."
 '
 """
-
-out_dir = os.path.dirname(os.path.abspath(__file__))
-conf_path = os.path.join(out_dir, "mosquitto-bridge.conf")
-deploy_path = os.path.join(out_dir, "deploy_bridge.sh")
 
 with open(conf_path, "w") as f:
     f.write(conf)
@@ -97,10 +86,6 @@ os.chmod(deploy_path, 0o755)
 print(f"Written: {conf_path}")
 print(f"Written: {deploy_path}")
 print()
-print("SAS token expires:", time.strftime('%Y-%m-%d', time.localtime(time.time() + DURATION)))
-print()
 print("Next steps:")
-print("  1. Check device has mosquitto-ssl: ssh root@192.168.8.1 'opkg install mosquitto-ssl'")
-print("  2. Deploy:  bash deploy_bridge.sh")
-print("  3. Monitor: az iot hub monitor-events --hub-name GLX300 --output table")
-print("  4. Test:    ssh root@192.168.8.1 'mosquitto_pub -h 127.0.0.1 -p 1883 -t glx300/data -m '{\"msg\":\"hello\"}'")
+print("  1. Deploy:  bash deploy_bridge.sh")
+print("  2. Monitor: az iot hub monitor-events --hub-name GLX300 --output table")
